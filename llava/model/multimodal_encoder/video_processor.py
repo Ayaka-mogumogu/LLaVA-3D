@@ -61,6 +61,10 @@ class RGBDVideoProcessor(ProcessorMixin):
 
         with open('./playground/data/annotations/embodiedscan_infos_full.json', 'r') as file:
             self.scene = json.load(file)
+    
+    def load_embodiedscan(self, embodiedscan_path):
+        with open(embodiedscan_path, 'r') as file:
+            self.scene = json.load(file)
 
     def valid_pose(self, video_poses):
         valid_video_poses = []
@@ -176,10 +180,35 @@ class RGBDVideoProcessor(ProcessorMixin):
         video_name = str(Path(*video_path.parts[-2:]))
         dataset = video.split('/')[-2]
         video_folder = str(Path(*video_path.parts[:-2]))
-        video_info = self.scene[video_name]
-        video_frames = [str(key) for key in video_info.keys() if key.startswith(dataset)]  # remove other paramters
+        print("video_path", video_path)
+        print("video_name", video_name)
+        print("video_folder", video_folder)
+        if dataset == '3rscan':
+            video_info = dict(filter(lambda item: item[0].startswith(dataset), self.scene.items()))   # video_info: {3rscan/3rscan0002: {}}
+            video_frames = []                                   # video_frames: {'3rscan/754e884c-ea24-2175-8b34-cead19d4198d/sequence/frame-000000.color.jpg': {pose: list, }}
+            for _, scene_attr in video_info.items():
+                for attr in scene_attr.keys(): 
+                    if attr.startswith(video_name):
+                        video_frames.append(scene_attr)
+        else:
+            video_info = self.scene[video_name]
+            video_frames = [str(key) for key in video_info.keys() if key.startswith(dataset)]  # remove other paramters
 
-        if len(video_frames) > self.num_frames:
+        
+        if dataset == '3rscan':
+            video_frame_images = [video_frame for i in range(len(video_frames)) for video_frame in video_frames[i].keys() if '.jpg' in video_frame]
+            if len(video_frame_images) > self.num_frames:
+                sample_factor = len(video_frame_images) // self.num_frames
+                start_point = 0
+                sample_ids = [(start_point + i*sample_factor) % len(video_frame_images) for i in range(self.num_frames)]
+                sample_frames = [video_frame_images[i] for i in sample_ids]
+            elif len(video_frame_images) < self.num_frames:
+                repeat_times = (self.num_frames // len(video_frame_images)) + 1
+                # Extend the list by repeating it and then slice to get exactly self.num_frames elements
+                sample_frames = (video_frame_images * repeat_times)[:self.num_frames]
+            else:
+                sample_frames = video_frame_images
+        elif len(video_frames) > self.num_frames:
             sample_factor = len(video_frames) // self.num_frames
             start_point = 0
             sample_ids = [(start_point + i*sample_factor) % len(video_frames) for i in range(self.num_frames)]
@@ -191,6 +220,9 @@ class RGBDVideoProcessor(ProcessorMixin):
         else:
             sample_frames = video_frames
 
+        print("sample_frames len:", len(sample_frames))
+        print("sample_frames:", sample_frames[0])
+        
         images = []
         depths = []
         poses = []
@@ -198,12 +230,15 @@ class RGBDVideoProcessor(ProcessorMixin):
             intrinsics = []
 
         for frame in sample_frames:
-            pose = np.array(video_info[frame]['pose']) # 4x4 array
+            if dataset == '3rscan':
+                pose = np.loadtxt(os.path.join(video_folder, frame.replace('color.jpg', 'pose.txt'))) # 4x4 array
+            else:
+                pose = np.array(video_info[frame]['pose']) # 4x4 array
             image = os.path.join(video_folder, frame)
             if 'scannet' in frame:
                 depth = os.path.join(video_folder, video_info[frame]['depth'])
             elif '3rscan' in frame:
-                depth = os.path.join(video_folder, frame.replace('color.jpg', 'depth.png').replace('3rscan', '3rscan_depth'))
+                depth = os.path.join(video_folder, frame.replace('color.jpg', 'depth.pgm'))# .replace('3rscan', '3rscan_depth'))
             elif 'matterport' in frame:
                 depth = os.path.join(video_folder, video_info[frame]['depth'])
                 intrinsic = np.array(video_info[frame]['intrinsic'])
@@ -218,12 +253,16 @@ class RGBDVideoProcessor(ProcessorMixin):
 
         if dataset == 'matterport3d':
             intrinsic_file = np.stack(intrinsics, axis=0) # Vx4x4 array
+        elif dataset == '3rscan':
+            intrinsic_file = np.array(video_frames[0]['intrinsic'])              # 4x4 array
+            depth_intrinsic_file = np.array(video_frames[0]['depth_intrinsic'])  # 4x4 array
+            sampled_video_info['depth_intrinsic_file'] = depth_intrinsic_file
+            axis_align_matrix_file = np.array(video_frames[0]['axis_align_matrix'])  # 4x4 array
         else:
             intrinsic_file = np.array(video_info['intrinsic']) # 4x4 array
             depth_intrinsic_file = np.array(video_info['depth_intrinsic'])  # 4x4 array
             sampled_video_info['depth_intrinsic_file'] = depth_intrinsic_file
-
-        axis_align_matrix_file = np.array(video_info['axis_align_matrix'])  # 4x4 array
+            axis_align_matrix_file = np.array(video_info['axis_align_matrix'])  # 4x4 array
         sampled_video_info['sample_image_files'] = images
         sampled_video_info['sample_depth_image_files'] = depths
         sampled_video_info['sample_pose_files'] = poses
@@ -398,7 +437,6 @@ class RGBDVideoProcessor(ProcessorMixin):
         intrinsic = video_info['intrinsic_file']  # (V, 4, 4) or (4, 4)
         if not isinstance(intrinsic, np.ndarray):
             intrinsic = np.loadtxt(intrinsic)
-
         for id, image_file in enumerate(video_info['sample_image_files']):
             image = Image.open(image_file).convert('RGB')
             image_size = image.size

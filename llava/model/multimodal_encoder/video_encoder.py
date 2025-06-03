@@ -32,6 +32,11 @@ class RGBDVideoTower(nn.Module):
         self.voxel_size = 0.2
         self.vision_tower_name = vision_tower
         self.video_tower_name = video_tower
+        # To save results
+        self.feat_xyz = None
+        self.xyz = None
+        self.p2v = None
+        self.pooled_features = None
 
         if not delay_load:
             self.load_model()
@@ -72,8 +77,11 @@ class RGBDVideoTower(nn.Module):
         """
         B, V, C, H, W = features.shape
         assert intrinsics.dim() == 4
-        # (B, V, 24, 24, 3)
         feat_xyz, xyz = backprojector_dataloader([features.flatten(0, 1)], depths, poses, intrinsics)
+        # save results
+        self.feat_xyz = feat_xyz
+        self.xyz = xyz
+        
         # (B, V*H*W, C)
         video_features = self.video_tower([features.flatten(0, 1)], [feat_xyz.flatten(0, 1)], (B, V))[0]
         video_xyz = feat_xyz.reshape(B, V*H*W, 3)
@@ -82,8 +90,15 @@ class RGBDVideoTower(nn.Module):
 
         if self.pooling == 'voxelize':
             p2v = voxelize(feat_xyz, self.voxel_size)  # （B, N)
+            # save results
+            self.p2v = p2v
+            
             pooled_video_features = torch.cat([scatter_mean(video_features[b], p2v[b], dim=0) for b in range(len(video_features))]) # bn, F
+            # save results
+            self.pooled_features = pooled_video_features
+            
             batch_offset = ((p2v).max(1)[0] + 1).cumsum(0).to(torch.int32)
+            print("pooled_video_features.shape", pooled_video_features.shape)
         else:
             raise NotImplementedError
         
