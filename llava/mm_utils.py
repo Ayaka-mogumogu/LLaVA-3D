@@ -192,10 +192,11 @@ def process_videos(videos, video_processor, mode='random', device=None, text=Non
     if isinstance(videos, str):
         videos = [videos]
     new_videos = []
+    new_original_images = []
     for video in videos:
-        video = video_processor.preprocess(video, return_tensors='pt', mode=mode, device=device, text=text)
+        video, original_image = video_processor.preprocess(video, return_tensors='pt', mode=mode, device=device, text=text)
         new_videos.append(video)
-
+        new_original_images.append(original_image)
     new_images = [video['images'] for video in new_videos]
     new_depths = [video['depth_images'] for video in new_videos]
     new_poses = [video['poses'] for video in new_videos]
@@ -206,7 +207,7 @@ def process_videos(videos, video_processor, mode='random', device=None, text=Non
     videos_dict['depths'] = torch.stack(new_depths, dim=0)
     videos_dict['poses'] = torch.stack(new_poses, dim=0)
     videos_dict['intrinsics'] = torch.stack(new_intrinsics, dim=0)
-    return videos_dict
+    return videos_dict, torch.stack(new_original_images, dim=0)
 
 
 def tokenizer_image_token(prompt, tokenizer, image_token_index=IMAGE_TOKEN_INDEX, return_tensors=None):

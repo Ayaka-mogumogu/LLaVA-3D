@@ -428,7 +428,7 @@ class RGBDVideoProcessor(ProcessorMixin):
         images = []
         depth_images = []
         poses = []
-
+        original_images = []
         if 'depth_intrinsic_file' in video_info:
             depth_intrinsic = video_info['depth_intrinsic_file']
             if not isinstance(depth_intrinsic, np.ndarray):
@@ -440,6 +440,7 @@ class RGBDVideoProcessor(ProcessorMixin):
         for id, image_file in enumerate(video_info['sample_image_files']):
             image = Image.open(image_file).convert('RGB')
             image_size = image.size
+            original_image = self.image_processor.preprocess(images=image, do_rescale=do_rescale, do_normalize=False, return_tensors=return_tensors)['pixel_values'][0] # [3, H, W]
             image = self.image_processor.preprocess(images=image, do_rescale=do_rescale, do_normalize=do_normalize, return_tensors=return_tensors)['pixel_values'][0] # [3, H, W]
             depth_image = Image.open(video_info['sample_depth_image_files'][id])
             depth_image_size = depth_image.size
@@ -450,6 +451,7 @@ class RGBDVideoProcessor(ProcessorMixin):
                 pose = np.loadtxt(pose)
             pose = torch.from_numpy(pose).float()  # [4, 4]
             images.append(image)
+            original_images.append(original_image)
             depth_images.append(depth_image)
             poses.append(pose)
 
@@ -478,4 +480,4 @@ class RGBDVideoProcessor(ProcessorMixin):
         video_dict['poses'] = torch.stack(poses)  # (V, 4, 4)
         video_dict['intrinsic'] = intrinsic  # (V, 4, 4)
 
-        return video_dict
+        return video_dict, torch.stack(original_images)
